@@ -94,3 +94,8 @@ def test_local_day_uses_kyiv_midnight():
     kyiv = ZoneInfo("Europe/Kyiv")
     assert local_day(datetime(2026, 9, 25, 20, 59, tzinfo=UTC), kyiv) == date(2026, 9, 25)
     assert local_day(datetime(2026, 9, 25, 21, 1, tzinfo=UTC), kyiv) == date(2026, 9, 26)
+
+
+def test_update_written_today_does_not_hide_yesterdays_miss():
+    today_writer = member(last_update=date(2026, 9, 24))
+    assert "1 день поспіль" in build_reminder([today_writer], YESTERDAY)

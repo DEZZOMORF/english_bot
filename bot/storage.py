@@ -59,9 +59,10 @@ class Storage:
         with self.conn:
             for table in ("chats", "members", "updates"):
                 self.conn.execute(
-                    f"UPDATE OR REPLACE {table} SET chat_id = ? WHERE chat_id = ?",
+                    f"UPDATE OR IGNORE {table} SET chat_id = ? WHERE chat_id = ?",
                     (new_id, old_id),
                 )
+                self.conn.execute(f"DELETE FROM {table} WHERE chat_id = ?", (old_id,))
 
     def upsert_member(
         self, chat_id: int, user_id: int, name: str, username: str | None, today: date
@@ -92,14 +93,15 @@ class Storage:
                 (chat_id, user_id, day.isoformat()),
             )
 
-    def active_members(self, chat_id: int) -> list[Member]:
+    def active_members(self, chat_id: int, until: date | None = None) -> list[Member]:
         rows = self.conn.execute(
             "SELECT m.user_id, m.name, m.username, m.first_seen, MAX(u.day) "
             "FROM members m "
             "LEFT JOIN updates u ON u.chat_id = m.chat_id AND u.user_id = m.user_id "
+            "AND (? IS NULL OR u.day <= ?) "
             "WHERE m.chat_id = ? AND m.active = 1 "
             "GROUP BY m.user_id, m.name, m.username, m.first_seen",
-            (chat_id,),
+            (until and until.isoformat(), until and until.isoformat(), chat_id),
         )
         return [
             Member(

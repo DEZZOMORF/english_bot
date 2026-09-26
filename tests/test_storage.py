@@ -73,3 +73,27 @@ def test_migrate_chat_moves_everything(store):
     [m] = store.active_members(-100)
     assert m.last_update == DAY
     assert store.active_members(1) == []
+
+
+def test_active_members_until_ignores_later_updates(store):
+    store.upsert_member(1, 10, "Anna", None, date(2026, 9, 1))
+    store.record_update(1, 10, date(2026, 9, 24))
+    store.record_update(1, 10, date(2026, 9, 26))
+    [m] = store.active_members(1, until=date(2026, 9, 25))
+    assert m.last_update == date(2026, 9, 24)
+    [m] = store.active_members(1)
+    assert m.last_update == date(2026, 9, 26)
+
+
+def test_migrate_chat_keeps_existing_destination_rows(store):
+    store.upsert_member(1, 10, "Old Anna", None, date(2026, 9, 1))
+    store.deactivate_member(1, 10)
+    store.upsert_member(-100, 10, "Anna", None, date(2026, 9, 20))
+    store.upsert_member(1, 11, "Bob", None, date(2026, 9, 1))
+    store.migrate_chat(1, -100)
+    members = {m.user_id: m for m in store.active_members(-100)}
+    assert members[10].name == "Anna"
+    assert members[10].first_seen == date(2026, 9, 20)
+    assert members[11].name == "Bob"
+    count = store.conn.execute("SELECT COUNT(*) FROM members WHERE chat_id = 1").fetchone()[0]
+    assert count == 0

@@ -1,8 +1,10 @@
 #!/bin/sh
 set -eu
+exec 9>/var/lock/englishbot-backup.lock
+flock -n 9 || { echo "$(date '+%F %T') englishbot backup already running"; exit 0; }
 BDIR=/opt/english-bot/backups
 mkdir -p "$BDIR"
-OUT="englishbot-$(date +%F_%H%M).db"
+OUT="englishbot-$(date +%F_%H%M%S).db"
 docker run --rm --user 0 -v englishbot_data:/data -v "$BDIR":/backup -e OUT="$OUT" \
   english-bot:latest \
   python -c "import os,sqlite3; s=sqlite3.connect('/data/data.db'); d=sqlite3.connect('/backup/'+os.environ['OUT']); s.backup(d); d.close(); s.close()"

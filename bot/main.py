@@ -151,29 +151,39 @@ async def send_text(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str)
         await context.bot.send_message(chat_id, chunk, parse_mode=ParseMode.HTML)
 
 
-async def send_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
+async def deliver_reminder(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str) -> None:
     store = storage(context)
-    yesterday = today(context) - timedelta(days=1)
-    chats = store.active_chats()
-    log.info("daily reminder for %d chat(s), report day %s", len(chats), yesterday)
-    for chat_id in chats:
-        text = build_reminder(store.active_members(chat_id), yesterday)
+    for _ in range(2):
         try:
             await send_text(context, chat_id, text)
             log.info("reminder sent to %s", chat_id)
+            return
         except ChatMigrated as exc:
             store.migrate_chat(chat_id, exc.new_chat_id)
-            await send_text(context, exc.new_chat_id, text)
-            log.info("reminder sent to migrated chat %s", exc.new_chat_id)
+            chat_id = exc.new_chat_id
         except Forbidden as exc:
             store.deactivate_chat(chat_id)
             log.warning("chat %s deactivated: %s", chat_id, exc)
+            return
         except BadRequest as exc:
             if "chat not found" in exc.message.lower():
                 store.deactivate_chat(chat_id)
                 log.warning("chat %s deactivated: %s", chat_id, exc)
             else:
                 log.exception("failed to send reminder to %s", chat_id)
+            return
+    log.error("gave up on reminder for %s after migration", chat_id)
+
+
+async def send_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
+    store = storage(context)
+    yesterday = today(context) - timedelta(days=1)
+    chats = store.active_chats()
+    log.info("daily reminder for %d chat(s), report day %s", len(chats), yesterday)
+    for chat_id in chats:
+        text = build_reminder(store.active_members(chat_id, until=yesterday), yesterday)
+        try:
+            await deliver_reminder(context, chat_id, text)
         except Exception:
             log.exception("failed to send reminder to %s", chat_id)
 
