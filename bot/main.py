@@ -1,0 +1,224 @@
+from __future__ import annotations
+
+import logging
+from datetime import UTC, datetime, timedelta
+
+from telegram import Chat, ChatMember, Update, User
+from telegram.constants import ParseMode
+from telegram.error import BadRequest, ChatMigrated, Forbidden
+from telegram.ext import (
+    Application,
+    ChatMemberHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
+
+from bot.config import Config, load_config
+from bot.report import build_reminder, build_stats, local_day, split_message
+from bot.storage import Storage
+
+log = logging.getLogger("english_bot")
+
+TELEGRAM_SERVICE_USER_ID = 777000
+PRESENT_STATUSES = {ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER}
+GONE_STATUSES = {ChatMember.LEFT, ChatMember.BANNED}
+
+HELP_TEXT = (
+    "Я щодня о {time} нагадую в групі написати <b>daily update</b> — як минув ваш день.\n"
+    "Будь-яке ваше повідомлення в групі за день рахується як апдейт.\n"
+    "У нагадуванні я показую, хто не написав учора і скільки днів поспіль.\n\n"
+    "/join — додати себе до списку\n"
+    "/leave — прибрати себе зі списку\n"
+    "/stats — статистика по учасниках"
+)
+
+
+def storage(context: ContextTypes.DEFAULT_TYPE) -> Storage:
+    return context.bot_data["storage"]
+
+
+def config(context: ContextTypes.DEFAULT_TYPE) -> Config:
+    return context.bot_data["config"]
+
+
+def is_person(user: User | None) -> bool:
+    return user is not None and not user.is_bot and user.id != TELEGRAM_SERVICE_USER_ID
+
+
+def today(context: ContextTypes.DEFAULT_TYPE):
+    return local_day(datetime.now(UTC), config(context).timezone)
+
+
+def remember(context: ContextTypes.DEFAULT_TYPE, chat: Chat, user: User) -> None:
+    store = storage(context)
+    store.upsert_chat(chat.id, chat.title)
+    store.upsert_member(chat.id, user.id, user.full_name, user.username, today(context))
+
+
+async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    if message is None or not is_person(user) or message.sender_chat is not None:
+        return
+    remember(context, message.chat, user)
+    day = local_day(message.date, config(context).timezone)
+    storage(context).record_update(message.chat.id, user.id, day)
+
+
+async def on_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    for user in message.new_chat_members or []:
+        if is_person(user):
+            remember(context, message.chat, user)
+
+
+async def on_left_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    user = message.left_chat_member
+    if user is not None:
+        storage(context).deactivate_member(message.chat.id, user.id)
+
+
+async def on_migrate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    if message.migrate_to_chat_id:
+        storage(context).migrate_chat(message.chat.id, message.migrate_to_chat_id)
+
+
+async def on_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    change = update.chat_member
+    member = change.new_chat_member
+    if not is_person(member.user):
+        return
+    present = member.status in PRESENT_STATUSES or (
+        member.status == ChatMember.RESTRICTED and getattr(member, "is_member", False)
+    )
+    if present:
+        remember(context, change.chat, member.user)
+    elif member.status in GONE_STATUSES or member.status == ChatMember.RESTRICTED:
+        storage(context).deactivate_member(change.chat.id, member.user.id)
+
+
+async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    change = update.my_chat_member
+    if change.chat.type not in (Chat.GROUP, Chat.SUPERGROUP):
+        return
+    status = change.new_chat_member.status
+    if status in GONE_STATUSES:
+        storage(context).deactivate_chat(change.chat.id)
+        log.info("removed from chat %s", change.chat.id)
+    else:
+        storage(context).upsert_chat(change.chat.id, change.chat.title)
+        log.info("added to chat %s (%s)", change.chat.id, change.chat.title)
+
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    text = HELP_TEXT.format(time=config(context).reminder_time.strftime("%H:%M"))
+    await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
+
+
+async def cmd_join(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if not is_person(user):
+        return
+    remember(context, update.effective_chat, user)
+    await update.effective_message.reply_text(
+        f"{user.full_name}, додав вас до списку daily update ✍️"
+    )
+
+
+async def cmd_leave(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if not is_person(user):
+        return
+    storage(context).deactivate_member(update.effective_chat.id, user.id)
+    await update.effective_message.reply_text(
+        f"{user.full_name}, прибрав вас зі списку. Повернутися можна через /join."
+    )
+
+
+async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat = update.effective_chat
+    text = build_stats(storage(context).active_members(chat.id), today(context))
+    for chunk in split_message(text):
+        await update.effective_message.reply_text(chunk, parse_mode=ParseMode.HTML)
+
+
+async def send_text(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str) -> None:
+    for chunk in split_message(text):
+        await context.bot.send_message(chat_id, chunk, parse_mode=ParseMode.HTML)
+
+
+async def send_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
+    store = storage(context)
+    yesterday = today(context) - timedelta(days=1)
+    chats = store.active_chats()
+    log.info("daily reminder for %d chat(s), report day %s", len(chats), yesterday)
+    for chat_id in chats:
+        text = build_reminder(store.active_members(chat_id), yesterday)
+        try:
+            await send_text(context, chat_id, text)
+            log.info("reminder sent to %s", chat_id)
+        except ChatMigrated as exc:
+            store.migrate_chat(chat_id, exc.new_chat_id)
+            await send_text(context, exc.new_chat_id, text)
+            log.info("reminder sent to migrated chat %s", exc.new_chat_id)
+        except Forbidden as exc:
+            store.deactivate_chat(chat_id)
+            log.warning("chat %s deactivated: %s", chat_id, exc)
+        except BadRequest as exc:
+            if "chat not found" in exc.message.lower():
+                store.deactivate_chat(chat_id)
+                log.warning("chat %s deactivated: %s", chat_id, exc)
+            else:
+                log.exception("failed to send reminder to %s", chat_id)
+        except Exception:
+            log.exception("failed to send reminder to %s", chat_id)
+
+
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    log.error("update failed: %s", update, exc_info=context.error)
+
+
+def build_application(cfg: Config) -> Application:
+    app = Application.builder().token(cfg.token).build()
+    app.bot_data["config"] = cfg
+    app.bot_data["storage"] = Storage(cfg.db_path)
+
+    groups = filters.ChatType.GROUPS
+    app.add_handler(CommandHandler(["start", "help"], cmd_help))
+    app.add_handler(CommandHandler("join", cmd_join, filters=groups))
+    app.add_handler(CommandHandler("leave", cmd_leave, filters=groups))
+    app.add_handler(CommandHandler("stats", cmd_stats, filters=groups))
+    app.add_handler(MessageHandler(groups & filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_members))
+    app.add_handler(MessageHandler(groups & filters.StatusUpdate.LEFT_CHAT_MEMBER, on_left_member))
+    app.add_handler(MessageHandler(groups & filters.StatusUpdate.MIGRATE, on_migrate))
+    app.add_handler(
+        MessageHandler(
+            groups & ~filters.COMMAND & ~filters.StatusUpdate.ALL & ~filters.IS_AUTOMATIC_FORWARD,
+            on_message,
+        )
+    )
+    app.add_handler(ChatMemberHandler(on_chat_member, ChatMemberHandler.CHAT_MEMBER))
+    app.add_handler(ChatMemberHandler(on_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
+    app.add_error_handler(on_error)
+
+    app.job_queue.run_daily(send_reminders, time=cfg.reminder_time, name="daily-reminder")
+    return app
+
+
+def main() -> None:
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=logging.INFO
+    )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    cfg = load_config()
+    app = build_application(cfg)
+    log.info("starting, reminder at %s %s", cfg.reminder_time.strftime("%H:%M"), cfg.timezone)
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,20 @@
+services:
+  bot:
+    build: .
+    image: english-bot:latest
+    env_file: .env
+    environment:
+      DB_PATH: /data/data.db
+    volumes:
+      - englishbot_data:/data
+    mem_limit: 128m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  englishbot_data:
+    name: englishbot_data
