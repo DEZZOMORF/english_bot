@@ -26,12 +26,12 @@ PRESENT_STATUSES = {ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNE
 GONE_STATUSES = {ChatMember.LEFT, ChatMember.BANNED}
 
 HELP_TEXT = (
-    "Я щодня о {time} нагадую в групі написати <b>daily update</b> — як минув ваш день.\n"
-    "Будь-яке ваше повідомлення в групі за день рахується як апдейт.\n"
-    "У нагадуванні я показую, хто не написав учора і скільки днів поспіль.\n\n"
-    "/join — додати себе до списку\n"
-    "/leave — прибрати себе зі списку\n"
-    "/stats — статистика по учасниках"
+    "Every day at {time} I remind the group to write a <b>daily update</b> — how your day went.\n"
+    "Any message you send in the group during the day counts as your update.\n"
+    "The reminder also lists who skipped yesterday and for how many days in a row.\n\n"
+    "/join — add yourself to the list\n"
+    "/leave — remove yourself from the list\n"
+    "/stats — stats for every member"
 )
 
 
@@ -125,7 +125,7 @@ async def cmd_join(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     remember(context, update.effective_chat, user)
     await update.effective_message.reply_text(
-        f"{user.full_name}, додав вас до списку daily update ✍️"
+        f"{user.full_name}, you're on the daily update list ✍️"
     )
 
 
@@ -135,7 +135,7 @@ async def cmd_leave(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     storage(context).deactivate_member(update.effective_chat.id, user.id)
     await update.effective_message.reply_text(
-        f"{user.full_name}, прибрав вас зі списку. Повернутися можна через /join."
+        f"{user.full_name}, you're off the list. Use /join to come back."
     )
 
 

@@ -26,11 +26,7 @@ def missed_streak(member: Member, yesterday: date) -> int:
 
 
 def plural_days(count: int) -> str:
-    if count % 10 == 1 and count % 100 != 11:
-        return f"{count} день"
-    if 2 <= count % 10 <= 4 and not 12 <= count % 100 <= 14:
-        return f"{count} дні"
-    return f"{count} днів"
+    return f"{count} day" if count == 1 else f"{count} days"
 
 
 def mention(member: Member) -> str:
@@ -39,8 +35,8 @@ def mention(member: Member) -> str:
 
 def build_reminder(members: list[Member], yesterday: date) -> str:
     lines = [
-        "⏰ Час написати <b>daily update</b>!",
-        "Розкажіть у чаті, як минув ваш день.",
+        "⏰ Time to write your <b>daily update</b>!",
+        "Tell the chat how your day went.",
     ]
     missed = sorted(
         ((missed_streak(m, yesterday), m) for m in members),
@@ -49,28 +45,28 @@ def build_reminder(members: list[Member], yesterday: date) -> str:
     missed = [(streak, m) for streak, m in missed if streak > 0]
     if missed:
         lines.append("")
-        lines.append(f"Учора ({yesterday:%d.%m}) не написали апдейт:")
+        lines.append(f"No update yesterday ({yesterday:%b %d}):")
         for streak, m in missed:
-            lines.append(f"• {mention(m)} — {plural_days(streak)} поспіль")
+            lines.append(f"• {mention(m)} — {plural_days(streak)} in a row")
     elif members:
         lines.append("")
-        lines.append(f"Учора ({yesterday:%d.%m}) апдейт написали всі 🎉")
+        lines.append(f"Everyone posted an update yesterday ({yesterday:%b %d}) 🎉")
     return "\n".join(lines)
 
 
 def build_stats(members: list[Member], today: date) -> str:
     if not members:
-        return "Поки що я нікого не знаю в цьому чаті. Напишіть повідомлення або /join."
+        return "I don't know anyone in this chat yet. Send a message or /join."
     yesterday = today - timedelta(days=1)
-    lines = ["📊 <b>Статистика daily update</b>"]
+    lines = ["📊 <b>Daily update stats</b>"]
     for m in sorted(members, key=lambda m: m.name.lower()):
         name = html.escape(m.name)
         if m.last_update == today:
-            lines.append(f"• {name} — сьогодні ✅")
+            lines.append(f"• {name} — today ✅")
             continue
         streak = missed_streak(m, yesterday)
-        last = f"останній апдейт {m.last_update:%d.%m}" if m.last_update else "апдейтів ще не було"
-        tail = f", без апдейту {plural_days(streak)} поспіль" if streak else ""
+        last = f"last update {m.last_update:%b %d}" if m.last_update else "no updates yet"
+        tail = f", {plural_days(streak)} without an update" if streak else ""
         lines.append(f"• {name} — {last}{tail}")
     return "\n".join(lines)
 

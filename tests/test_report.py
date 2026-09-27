@@ -33,10 +33,7 @@ def test_rejoin_resets_reference_to_first_seen():
 
 
 def test_plural_days():
-    assert [plural_days(n) for n in (1, 2, 4, 5, 11, 12, 21, 22, 25, 111)] == [
-        "1 день", "2 дні", "4 дні", "5 днів", "11 днів", "12 днів",
-        "21 день", "22 дні", "25 днів", "111 днів",
-    ]
+    assert [plural_days(n) for n in (1, 2, 11, 21)] == ["1 day", "2 days", "11 days", "21 days"]
 
 
 def test_reminder_lists_missed_sorted_by_streak_with_mentions():
@@ -47,21 +44,21 @@ def test_reminder_lists_missed_sorted_by_streak_with_mentions():
     ]
     text = build_reminder(members, YESTERDAY)
     assert "daily update" in text
-    assert "Учора (25.09) не написали апдейт:" in text
-    cid = text.index('<a href="tg://user?id=3">Cid &lt;x&gt;</a> — 5 днів поспіль')
-    bob = text.index('<a href="tg://user?id=1">Bob</a> — 1 день поспіль')
+    assert "No update yesterday (Sep 25):" in text
+    cid = text.index('<a href="tg://user?id=3">Cid &lt;x&gt;</a> — 5 days in a row')
+    bob = text.index('<a href="tg://user?id=1">Bob</a> — 1 day in a row')
     assert cid < bob
     assert "Anna" not in text
 
 
 def test_reminder_when_everyone_wrote():
     text = build_reminder([member(last_update=YESTERDAY)], YESTERDAY)
-    assert "апдейт написали всі" in text
+    assert "Everyone posted an update yesterday (Sep 25)" in text
 
 
 def test_reminder_without_members_is_plain():
     text = build_reminder([], YESTERDAY)
-    assert "Учора" not in text
+    assert "yesterday" not in text
 
 
 def test_stats():
@@ -74,9 +71,9 @@ def test_stats():
         ],
         today,
     )
-    assert "• Anna — сьогодні ✅" in text
-    assert "• Bob — останній апдейт 23.09, без апдейту 2 дні поспіль" in text
-    assert "• Cid — апдейтів ще не було" in text
+    assert "• Anna — today ✅" in text
+    assert "• Bob — last update Sep 23, 2 days without an update" in text
+    assert "• Cid — no updates yet" in text
 
 
 def test_stats_empty():
@@ -98,4 +95,4 @@ def test_local_day_uses_kyiv_midnight():
 
 def test_update_written_today_does_not_hide_yesterdays_miss():
     today_writer = member(last_update=date(2026, 9, 24))
-    assert "1 день поспіль" in build_reminder([today_writer], YESTERDAY)
+    assert "1 day in a row" in build_reminder([today_writer], YESTERDAY)
