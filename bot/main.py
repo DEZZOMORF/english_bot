@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from telegram import Chat, ChatMember, Update, User
 from telegram.constants import ParseMode
@@ -28,10 +28,10 @@ GONE_STATUSES = {ChatMember.LEFT, ChatMember.BANNED}
 HELP_TEXT = (
     "Every day at {time} I remind the group to write a <b>daily update</b> — how your day went.\n"
     "Any message you send in the group during the day counts as your update.\n"
-    "The reminder also lists who skipped yesterday and for how many days in a row.\n\n"
+    "The reminder also lists who hasn't posted today and who skipped yesterday.\n\n"
     "/join — add yourself to the list\n"
     "/leave — remove yourself from the list\n"
-    "/stats — stats for every member"
+    "/stats — who hasn't posted today or yesterday"
 )
 
 
@@ -141,7 +141,8 @@ async def cmd_leave(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat = update.effective_chat
-    text = build_stats(storage(context).active_members(chat.id), today(context))
+    day = today(context)
+    text = build_stats(storage(context).active_members(chat.id, day), day)
     for chunk in split_message(text):
         await update.effective_message.reply_text(chunk, parse_mode=ParseMode.HTML)
 
@@ -177,11 +178,11 @@ async def deliver_reminder(context: ContextTypes.DEFAULT_TYPE, chat_id: int, tex
 
 async def send_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
     store = storage(context)
-    yesterday = today(context) - timedelta(days=1)
+    day = today(context)
     chats = store.active_chats()
-    log.info("daily reminder for %d chat(s), report day %s", len(chats), yesterday)
+    log.info("daily reminder for %d chat(s), day %s", len(chats), day)
     for chat_id in chats:
-        text = build_reminder(store.active_members(chat_id, until=yesterday), yesterday)
+        text = build_reminder(store.active_members(chat_id, day), day)
         try:
             await deliver_reminder(context, chat_id, text)
         except Exception:
