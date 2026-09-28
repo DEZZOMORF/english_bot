@@ -12,21 +12,22 @@ class Member:
     user_id: int
     name: str
     username: str | None
-    first_seen: date
-    last_update: date | None
+    seen_at: datetime
+    last_update_at: datetime | None
 
 
 def local_day(moment: datetime, tz: tzinfo) -> date:
     return moment.astimezone(tz).date()
 
 
-def missed_streak(member: Member, yesterday: date) -> int:
-    reference = max(member.first_seen, member.last_update or member.first_seen)
-    return max(0, (yesterday - reference).days)
+def silence(member: Member, now: datetime) -> timedelta:
+    reference = max(member.seen_at, member.last_update_at or member.seen_at)
+    return max(timedelta(0), now - reference)
 
 
-def plural_days(count: int) -> str:
-    return f"{count} day" if count == 1 else f"{count} days"
+def describe(gap: timedelta) -> str:
+    days = gap.days
+    return f"{days} day" if days == 1 else f"{days} days"
 
 
 def mention(member: Member) -> str:
@@ -39,38 +40,38 @@ def sort_key(member: Member) -> str:
     return (member.username or member.name).lower()
 
 
-def missing_lines(members: list[Member], today: date, min_days: int) -> list[str]:
-    yesterday = today - timedelta(days=1)
-    skipped = sorted(
-        ((missed_streak(m, yesterday), m) for m in members),
+def missing_lines(members: list[Member], now: datetime, hours: int) -> list[str]:
+    threshold = timedelta(hours=hours)
+    silent = sorted(
+        ((silence(m, now), m) for m in members),
         key=lambda pair: (-pair[0], sort_key(pair[1])),
     )
-    skipped = [(streak, m) for streak, m in skipped if streak >= min_days]
-    if not skipped:
+    silent = [(gap, m) for gap, m in silent if gap >= threshold]
+    if not silent:
         return []
     return [
         "",
-        f"No update for {min_days}+ days:",
-        *(f"• {mention(m)} — {plural_days(streak)}" for streak, m in skipped),
+        f"No update for {hours}+ hours:",
+        *(f"• {mention(m)} — {describe(gap)}" for gap, m in silent),
     ]
 
 
-def build_reminder(members: list[Member], today: date, min_days: int) -> str:
+def build_reminder(members: list[Member], now: datetime, hours: int) -> str:
     return "\n".join(
         [
             "⏰ Time to write your <b>daily update</b>!",
             "Tell the chat how your day went.",
-            *missing_lines(members, today, min_days),
+            *missing_lines(members, now, hours),
         ]
     )
 
 
-def build_stats(members: list[Member], today: date, min_days: int) -> str:
+def build_stats(members: list[Member], now: datetime, hours: int) -> str:
     if not members:
         return "I don't know anyone in this chat yet. Members appear here once they join or send a message."
-    missing = missing_lines(members, today, min_days)
+    missing = missing_lines(members, now, hours)
     if not missing:
-        return f"📊 Nobody has gone {min_days}+ days without an update 🎉"
+        return f"📊 Nobody has gone {hours}+ hours without an update 🎉"
     return "\n".join(["📊 <b>Daily update status</b>", *missing])
 
 

@@ -28,8 +28,8 @@ GONE_STATUSES = {ChatMember.LEFT, ChatMember.BANNED}
 HELP_TEXT = (
     "Every day at {time} I remind the group to write a <b>daily update</b> — how your day went.\n"
     "Any message you send in the group during the day counts as your update.\n"
-    "The reminder also lists who has gone {days}+ days without an update.\n\n"
-    "/stats — who has gone {days}+ days without an update"
+    "The reminder also lists who has gone {hours}+ hours without an update.\n\n"
+    "/stats — who has gone {hours}+ hours without an update"
 )
 
 
@@ -45,14 +45,10 @@ def is_person(user: User | None) -> bool:
     return user is not None and not user.is_bot and user.id != TELEGRAM_SERVICE_USER_ID
 
 
-def today(context: ContextTypes.DEFAULT_TYPE):
-    return local_day(datetime.now(UTC), config(context).timezone)
-
-
-def remember(context: ContextTypes.DEFAULT_TYPE, chat: Chat, user: User) -> None:
+def remember(context: ContextTypes.DEFAULT_TYPE, chat: Chat, user: User, at: datetime) -> None:
     store = storage(context)
     store.upsert_chat(chat.id, chat.title)
-    store.upsert_member(chat.id, user.id, user.full_name, user.username, today(context))
+    store.upsert_member(chat.id, user.id, user.full_name, user.username, at)
 
 
 async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -60,9 +56,9 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     user = update.effective_user
     if message is None or not is_person(user) or message.sender_chat is not None:
         return
-    remember(context, message.chat, user)
+    remember(context, message.chat, user, message.date)
     day = local_day(message.date, config(context).timezone)
-    storage(context).record_update(message.chat.id, user.id, day)
+    storage(context).record_update(message.chat.id, user.id, day, message.date)
 
 
 async def on_left_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -82,7 +78,7 @@ async def on_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     message = update.effective_message
     for user in message.new_chat_members or []:
         if is_person(user):
-            remember(context, message.chat, user)
+            remember(context, message.chat, user, message.date)
 
 
 async def on_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -94,7 +90,7 @@ async def on_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         member.status == ChatMember.RESTRICTED and getattr(member, "is_member", False)
     )
     if present:
-        remember(context, change.chat, member.user)
+        remember(context, change.chat, member.user, change.date)
     elif not present:
         storage(context).deactivate_member(change.chat.id, member.user.id)
 
@@ -114,15 +110,14 @@ async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     cfg = config(context)
-    text = HELP_TEXT.format(time=cfg.reminder_time.strftime("%H:%M"), days=cfg.min_missed_days)
+    text = HELP_TEXT.format(time=cfg.reminder_time.strftime("%H:%M"), hours=cfg.missed_hours)
     await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat = update.effective_chat
-    day = today(context)
     text = build_stats(
-        storage(context).active_members(chat.id, day), day, config(context).min_missed_days
+        storage(context).active_members(chat.id), datetime.now(UTC), config(context).missed_hours
     )
     for chunk in split_message(text):
         await update.effective_message.reply_text(chunk, parse_mode=ParseMode.HTML)
@@ -159,13 +154,11 @@ async def deliver_reminder(context: ContextTypes.DEFAULT_TYPE, chat_id: int, tex
 
 async def send_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
     store = storage(context)
-    day = today(context)
+    now = datetime.now(UTC)
     chats = store.active_chats()
-    log.info("daily reminder for %d chat(s), day %s", len(chats), day)
+    log.info("daily reminder for %d chat(s)", len(chats))
     for chat_id in chats:
-        text = build_reminder(
-            store.active_members(chat_id, day), day, config(context).min_missed_days
-        )
+        text = build_reminder(store.active_members(chat_id), now, config(context).missed_hours)
         try:
             await deliver_reminder(context, chat_id, text)
         except Exception:
