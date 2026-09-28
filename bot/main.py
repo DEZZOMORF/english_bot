@@ -22,15 +22,12 @@ from bot.storage import Storage
 log = logging.getLogger("english_bot")
 
 TELEGRAM_SERVICE_USER_ID = 777000
-PRESENT_STATUSES = {ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER}
 GONE_STATUSES = {ChatMember.LEFT, ChatMember.BANNED}
 
 HELP_TEXT = (
     "Every day at {time} I remind the group to write a <b>daily update</b> — how your day went.\n"
     "Any message you send in the group during the day counts as your update.\n"
     "The reminder also lists who has gone {days}+ days without an update.\n\n"
-    "/join — add yourself to the list\n"
-    "/leave — remove yourself from the list\n"
     "/stats — who has gone {days}+ days without an update"
 )
 
@@ -67,13 +64,6 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     storage(context).record_update(message.chat.id, user.id, day)
 
 
-async def on_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    message = update.effective_message
-    for user in message.new_chat_members or []:
-        if is_person(user):
-            remember(context, message.chat, user)
-
-
 async def on_left_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     user = message.left_chat_member
@@ -90,14 +80,10 @@ async def on_migrate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 async def on_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     change = update.chat_member
     member = change.new_chat_member
-    if not is_person(member.user):
-        return
-    present = member.status in PRESENT_STATUSES or (
-        member.status == ChatMember.RESTRICTED and getattr(member, "is_member", False)
+    gone = member.status in GONE_STATUSES or (
+        member.status == ChatMember.RESTRICTED and not getattr(member, "is_member", True)
     )
-    if present:
-        remember(context, change.chat, member.user)
-    elif member.status in GONE_STATUSES or member.status == ChatMember.RESTRICTED:
+    if gone:
         storage(context).deactivate_member(change.chat.id, member.user.id)
 
 
@@ -118,26 +104,6 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     cfg = config(context)
     text = HELP_TEXT.format(time=cfg.reminder_time.strftime("%H:%M"), days=cfg.min_missed_days)
     await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
-
-
-async def cmd_join(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    if not is_person(user):
-        return
-    remember(context, update.effective_chat, user)
-    await update.effective_message.reply_text(
-        f"{user.full_name}, you're on the daily update list ✍️"
-    )
-
-
-async def cmd_leave(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    if not is_person(user):
-        return
-    storage(context).deactivate_member(update.effective_chat.id, user.id)
-    await update.effective_message.reply_text(
-        f"{user.full_name}, you're off the list. Use /join to come back."
-    )
 
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -205,10 +171,7 @@ def build_application(cfg: Config) -> Application:
 
     groups = filters.ChatType.GROUPS
     app.add_handler(CommandHandler(["start", "help"], cmd_help))
-    app.add_handler(CommandHandler("join", cmd_join, filters=groups))
-    app.add_handler(CommandHandler("leave", cmd_leave, filters=groups))
     app.add_handler(CommandHandler("stats", cmd_stats, filters=groups))
-    app.add_handler(MessageHandler(groups & filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_members))
     app.add_handler(MessageHandler(groups & filters.StatusUpdate.LEFT_CHAT_MEMBER, on_left_member))
     app.add_handler(MessageHandler(groups & filters.StatusUpdate.MIGRATE, on_migrate))
     app.add_handler(
