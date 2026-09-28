@@ -76,14 +76,14 @@ def test_migrate_chat_moves_everything(store):
     assert store.active_members(1, TODAY) == []
 
 
-def test_active_members_split_today_from_earlier_updates(store):
+def test_active_members_ignore_todays_update(store):
     store.upsert_member(1, 10, "Anna", None, date(2026, 9, 1))
     store.record_update(1, 10, date(2026, 9, 24))
     store.record_update(1, 10, date(2026, 9, 26))
     [m] = store.active_members(1, date(2026, 9, 26))
-    assert (m.last_update, m.posted_today) == (date(2026, 9, 24), True)
-    [m] = store.active_members(1, date(2026, 9, 25))
-    assert (m.last_update, m.posted_today) == (date(2026, 9, 24), False)
+    assert m.last_update == date(2026, 9, 24)
+    [m] = store.active_members(1, date(2026, 9, 27))
+    assert m.last_update == date(2026, 9, 26)
 
 
 def test_migrate_chat_keeps_existing_destination_rows(store):

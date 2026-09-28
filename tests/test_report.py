@@ -15,8 +15,8 @@ from bot.report import (
 YESTERDAY = date(2026, 9, 25)
 
 
-def member(user_id=1, name="Anna", first_seen=date(2026, 9, 1), last_update=None, posted_today=False, username=None):
-    return Member(user_id, name, username, first_seen, last_update, posted_today)
+def member(user_id=1, name="Anna", first_seen=date(2026, 9, 1), last_update=None, username=None):
+    return Member(user_id, name, username, first_seen, last_update)
 
 
 def test_wrote_yesterday_has_no_streak():
@@ -53,64 +53,59 @@ def test_mention_prefers_username():
     assert mention(member(user_id=7, name="Cid <x>")) == '<a href="tg://user?id=7">Cid &lt;x&gt;</a>'
 
 
-def test_reminder_lists_only_missing_members():
+def test_reminder_lists_only_members_over_threshold():
     members = [
-        member(1, "Bob", username="bob", last_update=date(2026, 9, 24), posted_today=True),
-        member(2, "Anna", username="anna", last_update=YESTERDAY, posted_today=True),
+        member(1, "Bob", username="bob", last_update=date(2026, 9, 22)),
+        member(2, "Anna", username="anna", last_update=date(2026, 9, 23)),
         member(3, "Cid <x>", last_update=date(2026, 9, 20)),
         member(4, "Dan", username="dan", last_update=YESTERDAY),
     ]
-    text = build_reminder(members, TODAY)
+    text = build_reminder(members, TODAY, min_days=3)
     assert "daily update" in text
-    today_block, yesterday_block = text.split("Skipped yesterday (Sep 25):")
-    assert "• " + mention(members[2]) in today_block
-    assert "• @dan" in today_block
-    assert "@bob" not in today_block
-    assert "@anna" not in text
-    cid = yesterday_block.index(mention(members[2]) + " — 5 days in a row")
-    bob = yesterday_block.index("@bob — 1 day in a row")
+    assert "No update for 3+ days:" in text
+    cid = text.index(mention(members[2]) + " — 5 days")
+    bob = text.index("@bob — 3 days")
     assert cid < bob
-    assert "@dan" not in yesterday_block
+    assert "@anna" not in text
+    assert "@dan" not in text
+    assert "today" not in text
 
 
-def test_reminder_when_everyone_is_on_track():
-    text = build_reminder([member(last_update=YESTERDAY, posted_today=True)], TODAY)
-    assert "Everyone has posted today and yesterday 🎉" in text
-    assert "Not posted" not in text
+def test_reminder_without_anyone_over_threshold_is_plain():
+    text = build_reminder([member(last_update=date(2026, 9, 23))], TODAY, min_days=3)
+    assert text == "⏰ Time to write your <b>daily update</b>!\nTell the chat how your day went."
 
 
-def test_reminder_without_members_is_plain():
-    text = build_reminder([], TODAY)
-    assert "Not posted" not in text
-    assert "Everyone" not in text
+def test_threshold_is_configurable():
+    text = build_reminder([member(username="a", last_update=date(2026, 9, 23))], TODAY, min_days=2)
+    assert "No update for 2+ days:\n• @a — 2 days" in text
 
 
-def test_newcomer_seen_today_is_asked_for_today_only():
-    text = build_reminder([member(username="new", first_seen=TODAY)], TODAY)
-    assert "Not posted today (Sep 26) yet:\n• @new" in text
-    assert "Skipped yesterday" not in text
+def test_newcomer_is_not_listed():
+    assert "@new" not in build_reminder([member(username="new", first_seen=TODAY)], TODAY, min_days=1)
 
 
-def test_stats_shows_only_missing_members():
+def test_stats_shows_only_members_over_threshold():
     text = build_stats(
         [
-            member(1, "Anna", username="anna", last_update=YESTERDAY, posted_today=True),
-            member(2, "Bob", username="bob", last_update=date(2026, 9, 23)),
+            member(1, "Anna", username="anna", last_update=YESTERDAY),
+            member(2, "Bob", username="bob", last_update=date(2026, 9, 21)),
         ],
         TODAY,
+        min_days=3,
     )
     assert text.startswith("📊 <b>Daily update status</b>")
     assert "@anna" not in text
-    assert "• @bob — 2 days in a row" in text
+    assert "• @bob — 4 days" in text
 
 
-def test_stats_everyone_on_track():
-    text = build_stats([member(last_update=YESTERDAY, posted_today=True)], TODAY)
-    assert text == "📊 Everyone has posted today and yesterday 🎉"
+def test_stats_nobody_over_threshold():
+    text = build_stats([member(last_update=YESTERDAY)], TODAY, min_days=3)
+    assert text == "📊 Nobody has gone 3+ days without an update 🎉"
 
 
 def test_stats_empty():
-    assert "/join" in build_stats([], TODAY)
+    assert "/join" in build_stats([], TODAY, min_days=3)
 
 
 def test_split_message_respects_limit_on_line_boundaries():

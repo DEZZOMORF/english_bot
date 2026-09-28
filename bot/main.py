@@ -28,10 +28,10 @@ GONE_STATUSES = {ChatMember.LEFT, ChatMember.BANNED}
 HELP_TEXT = (
     "Every day at {time} I remind the group to write a <b>daily update</b> — how your day went.\n"
     "Any message you send in the group during the day counts as your update.\n"
-    "The reminder also lists who hasn't posted today and who skipped yesterday.\n\n"
+    "The reminder also lists who has gone {days}+ days without an update.\n\n"
     "/join — add yourself to the list\n"
     "/leave — remove yourself from the list\n"
-    "/stats — who hasn't posted today or yesterday"
+    "/stats — who has gone {days}+ days without an update"
 )
 
 
@@ -115,7 +115,8 @@ async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    text = HELP_TEXT.format(time=config(context).reminder_time.strftime("%H:%M"))
+    cfg = config(context)
+    text = HELP_TEXT.format(time=cfg.reminder_time.strftime("%H:%M"), days=cfg.min_missed_days)
     await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
@@ -142,7 +143,9 @@ async def cmd_leave(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat = update.effective_chat
     day = today(context)
-    text = build_stats(storage(context).active_members(chat.id, day), day)
+    text = build_stats(
+        storage(context).active_members(chat.id, day), day, config(context).min_missed_days
+    )
     for chunk in split_message(text):
         await update.effective_message.reply_text(chunk, parse_mode=ParseMode.HTML)
 
@@ -182,7 +185,9 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
     chats = store.active_chats()
     log.info("daily reminder for %d chat(s), day %s", len(chats), day)
     for chat_id in chats:
-        text = build_reminder(store.active_members(chat_id, day), day)
+        text = build_reminder(
+            store.active_members(chat_id, day), day, config(context).min_missed_days
+        )
         try:
             await deliver_reminder(context, chat_id, text)
         except Exception:

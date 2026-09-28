@@ -14,7 +14,6 @@ class Member:
     username: str | None
     first_seen: date
     last_update: date | None
-    posted_today: bool = False
 
 
 def local_day(moment: datetime, tz: tzinfo) -> date:
@@ -40,48 +39,38 @@ def sort_key(member: Member) -> str:
     return (member.username or member.name).lower()
 
 
-def missing_lines(members: list[Member], today: date) -> list[str]:
+def missing_lines(members: list[Member], today: date, min_days: int) -> list[str]:
     yesterday = today - timedelta(days=1)
-    not_today = sorted(
-        (m for m in members if not m.posted_today), key=sort_key
-    )
     skipped = sorted(
         ((missed_streak(m, yesterday), m) for m in members),
         key=lambda pair: (-pair[0], sort_key(pair[1])),
     )
-    skipped = [(streak, m) for streak, m in skipped if streak > 0]
-    lines: list[str] = []
-    if not_today:
-        lines.append("")
-        lines.append(f"Not posted today ({today:%b %d}) yet:")
-        lines.extend(f"• {mention(m)}" for m in not_today)
-    if skipped:
-        lines.append("")
-        lines.append(f"Skipped yesterday ({yesterday:%b %d}):")
-        lines.extend(f"• {mention(m)} — {plural_days(streak)} in a row" for streak, m in skipped)
-    return lines
-
-
-def build_reminder(members: list[Member], today: date) -> str:
-    lines = [
-        "⏰ Time to write your <b>daily update</b>!",
-        "Tell the chat how your day went.",
+    skipped = [(streak, m) for streak, m in skipped if streak >= min_days]
+    if not skipped:
+        return []
+    return [
+        "",
+        f"No update for {min_days}+ days:",
+        *(f"• {mention(m)} — {plural_days(streak)}" for streak, m in skipped),
     ]
-    missing = missing_lines(members, today)
-    if missing:
-        lines.extend(missing)
-    elif members:
-        lines.append("")
-        lines.append("Everyone has posted today and yesterday 🎉")
-    return "\n".join(lines)
 
 
-def build_stats(members: list[Member], today: date) -> str:
+def build_reminder(members: list[Member], today: date, min_days: int) -> str:
+    return "\n".join(
+        [
+            "⏰ Time to write your <b>daily update</b>!",
+            "Tell the chat how your day went.",
+            *missing_lines(members, today, min_days),
+        ]
+    )
+
+
+def build_stats(members: list[Member], today: date, min_days: int) -> str:
     if not members:
         return "I don't know anyone in this chat yet. Send a message or /join."
-    missing = missing_lines(members, today)
+    missing = missing_lines(members, today, min_days)
     if not missing:
-        return "📊 Everyone has posted today and yesterday 🎉"
+        return f"📊 Nobody has gone {min_days}+ days without an update 🎉"
     return "\n".join(["📊 <b>Daily update status</b>", *missing])
 
 

@@ -94,17 +94,14 @@ class Storage:
             )
 
     def active_members(self, chat_id: int, today: date) -> list[Member]:
-        day = today.isoformat()
         rows = self.conn.execute(
-            "SELECT m.user_id, m.name, m.username, m.first_seen, "
-            "MAX(CASE WHEN u.day < ? THEN u.day END), "
-            "COALESCE(MAX(u.day = ?), 0) "
+            "SELECT m.user_id, m.name, m.username, m.first_seen, MAX(u.day) "
             "FROM members m "
             "LEFT JOIN updates u ON u.chat_id = m.chat_id AND u.user_id = m.user_id "
-            "AND u.day <= ? "
+            "AND u.day < ? "
             "WHERE m.chat_id = ? AND m.active = 1 "
             "GROUP BY m.user_id, m.name, m.username, m.first_seen",
-            (day, day, day, chat_id),
+            (today.isoformat(), chat_id),
         )
         return [
             Member(
@@ -113,7 +110,6 @@ class Storage:
                 username=username,
                 first_seen=date.fromisoformat(first_seen),
                 last_update=date.fromisoformat(last) if last else None,
-                posted_today=bool(posted_today),
             )
-            for user_id, name, username, first_seen, last, posted_today in rows
+            for user_id, name, username, first_seen, last in rows
         ]

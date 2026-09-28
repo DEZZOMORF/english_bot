@@ -12,6 +12,7 @@ class Config:
     db_path: str
     timezone: ZoneInfo
     reminder_time: time
+    min_missed_days: int
 
 
 def parse_time(value: str, tz: ZoneInfo) -> time:
@@ -29,4 +30,5 @@ def load_config() -> Config:
         db_path=os.environ.get("DB_PATH", "data.db"),
         timezone=tz,
         reminder_time=parse_time(os.environ.get("REMINDER_TIME", "20:00"), tz),
+        min_missed_days=int(os.environ.get("MIN_MISSED_DAYS", "3")),
     )
