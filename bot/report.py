@@ -67,7 +67,7 @@ def build_reminder(members: list[Member], today: date, min_days: int) -> str:
 
 def build_stats(members: list[Member], today: date, min_days: int) -> str:
     if not members:
-        return "I don't know anyone in this chat yet. Send any message to get on the list."
+        return "I don't know anyone in this chat yet. Members appear here once they join or send a message."
     missing = missing_lines(members, today, min_days)
     if not missing:
         return f"📊 Nobody has gone {min_days}+ days without an update 🎉"

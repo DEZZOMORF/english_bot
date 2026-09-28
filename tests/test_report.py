@@ -105,7 +105,7 @@ def test_stats_nobody_over_threshold():
 
 
 def test_stats_empty():
-    assert "Send any message" in build_stats([], TODAY, min_days=3)
+    assert "join or send a message" in build_stats([], TODAY, min_days=3)
 
 
 def test_split_message_respects_limit_on_line_boundaries():

@@ -22,6 +22,7 @@ from bot.storage import Storage
 log = logging.getLogger("english_bot")
 
 TELEGRAM_SERVICE_USER_ID = 777000
+PRESENT_STATUSES = {ChatMember.MEMBER, ChatMember.ADMINISTRATOR, ChatMember.OWNER}
 GONE_STATUSES = {ChatMember.LEFT, ChatMember.BANNED}
 
 HELP_TEXT = (
@@ -77,13 +78,24 @@ async def on_migrate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         storage(context).migrate_chat(message.chat.id, message.migrate_to_chat_id)
 
 
+async def on_new_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    for user in message.new_chat_members or []:
+        if is_person(user):
+            remember(context, message.chat, user)
+
+
 async def on_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     change = update.chat_member
     member = change.new_chat_member
-    gone = member.status in GONE_STATUSES or (
-        member.status == ChatMember.RESTRICTED and not getattr(member, "is_member", True)
+    if not is_person(member.user):
+        return
+    present = member.status in PRESENT_STATUSES or (
+        member.status == ChatMember.RESTRICTED and getattr(member, "is_member", False)
     )
-    if gone:
+    if present:
+        remember(context, change.chat, member.user)
+    elif not present:
         storage(context).deactivate_member(change.chat.id, member.user.id)
 
 
@@ -172,6 +184,7 @@ def build_application(cfg: Config) -> Application:
     groups = filters.ChatType.GROUPS
     app.add_handler(CommandHandler(["start", "help"], cmd_help))
     app.add_handler(CommandHandler("stats", cmd_stats, filters=groups))
+    app.add_handler(MessageHandler(groups & filters.StatusUpdate.NEW_CHAT_MEMBERS, on_new_members))
     app.add_handler(MessageHandler(groups & filters.StatusUpdate.LEFT_CHAT_MEMBER, on_left_member))
     app.add_handler(MessageHandler(groups & filters.StatusUpdate.MIGRATE, on_migrate))
     app.add_handler(
