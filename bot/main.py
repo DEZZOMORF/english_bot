@@ -190,7 +190,12 @@ def build_application(cfg: Config) -> Application:
     app.add_handler(ChatMemberHandler(on_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
     app.add_error_handler(on_error)
 
-    app.job_queue.run_daily(send_reminders, time=cfg.reminder_time, name="daily-reminder")
+    app.job_queue.run_daily(
+        send_reminders,
+        time=cfg.reminder_time,
+        name="daily-reminder",
+        job_kwargs={"misfire_grace_time": 3600, "coalesce": True},
+    )
     return app
 
 
